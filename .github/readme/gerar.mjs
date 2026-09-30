@@ -6,7 +6,7 @@
  * Sem dependências. Todo texto de terminal nas cenas lá embaixo é cópia de uma
  * execução real — se a saída mudar, cole a nova e rode de novo.
  */
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SAIDA = import.meta.dirname;
@@ -130,7 +130,7 @@ ${linhasSvg(linhas, { x: 20, y0: +(44 + alturaLinha * 0.75).toFixed(1), alturaLi
     </g>`;
 }
 
-function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotulo }) {
+function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, arte = '', defs = '', circulos = true, rotulo }) {
   const { de, ate, texto = '#ffffff', suave = 'rgba(255,255,255,.78)', circulo = '#ffffff', circuloOpacidade = 0.08 } = cores;
   const tamanhoTitulo = titulo.length > 16 ? 44 : 52;
 
@@ -163,11 +163,14 @@ function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotu
       <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity=".28"/>
     </filter>
     <clipPath id="recorte"><rect width="428" height="252" rx="18"/></clipPath>
+    <clipPath id="moldura"><rect width="1200" height="380" rx="24"/></clipPath>${defs}
   </defs>
 
   <rect width="1200" height="380" rx="24" fill="url(#bg)"/>
-  <circle cx="1105" cy="60" r="190" fill="${circulo}" opacity="${circuloOpacidade}"/>
-  <circle cx="110" cy="360" r="150" fill="${circulo}" opacity="${circuloOpacidade * 0.8}"/>
+${circulos ? `  <circle cx="1105" cy="60" r="190" fill="${circulo}" opacity="${circuloOpacidade}"/>
+  <circle cx="110" cy="360" r="150" fill="${circulo}" opacity="${circuloOpacidade * 0.8}"/>` : ''}
+  <g clip-path="url(#moldura)">${arte}
+  </g>
 
   <text x="72" y="148" font-family="${FONTE_UI}" font-size="${tamanhoTitulo}" font-weight="800" letter-spacing="-1" fill="${texto}">${escapar(titulo)}</text>
   <text x="74" y="196" font-family="${FONTE_UI}" font-size="24" font-weight="600" fill="${texto}">${escapar(tagline)}</text>
@@ -177,15 +180,38 @@ function banner({ arquivo, titulo, tagline, stack, pills = [], cores, card, rotu
     ${pillsSvg}
   </g>
 
-  <g transform="translate(700,64)">
+${card ? `  <g transform="translate(700,64)">
     <rect width="428" height="252" rx="18" fill="${card.fundo ?? '#ffffff'}" filter="url(#sombra)"/>
     <g clip-path="url(#recorte)">${card.conteudo}
     </g>
-  </g>
+  </g>` : ''}
 </svg>
 `;
   writeFileSync(join(SAIDA, arquivo), svg);
   console.log(`✓ ${arquivo}  (1200×380)`);
+}
+
+/**
+ * Embute um SVG do próprio repositório (logo, ícone) dentro do banner, na
+ * caixa x/y/largura/altura. Ids ganham prefixo para não colidirem entre si.
+ * `trocar` substitui cores literais (ex.: { white: '#1a1a1a' }).
+ */
+function svgArquivo(caminho, { x, y, largura, altura, trocar = {}, extra = '' }) {
+  let bruto = readFileSync(join(SAIDA, '..', '..', caminho), 'utf8')
+    .replace(/<\?xml[^>]*>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const raiz = bruto.match(/<svg[ >][^>]*>/)[0];
+  const viewBox =
+    (raiz.match(/viewBox="([^"]+)"/) ?? [])[1] ??
+    `0 0 ${parseFloat(raiz.match(/width="([^"]+)"/)[1])} ${parseFloat(raiz.match(/height="([^"]+)"/)[1])}`;
+  const prefixo = caminho.replace(/[^a-z0-9]/gi, '');
+  let miolo = bruto.slice(bruto.indexOf(raiz) + raiz.length, bruto.lastIndexOf('</svg>'));
+  miolo = miolo
+    .replace(/id="([^"]+)"/g, `id="${prefixo}-$1"`)
+    .replace(/url\(#([^)]+)\)/g, `url(#${prefixo}-$1)`)
+    .replace(/href="#([^"]+)"/g, `href="#${prefixo}-$1"`);
+  for (const [de, para] of Object.entries(trocar)) miolo = miolo.split(`"${de}"`).join(`"${para}"`);
+  return `<svg x="${x}" y="${y}" width="${largura}" height="${altura}" viewBox="${viewBox}" ${extra}>${miolo.trim()}</svg>`;
 }
 
 // Atalhos ANSI para escrever as cenas
@@ -202,7 +228,13 @@ const _ = '\x1b[0m';
 // ---------------------------------------------------------------------
 // Cenas
 // ---------------------------------------------------------------------
-// Card: o grid da página inteira em três linhas de grid-template-areas (css/style.css).
+// Arte: o grid-template-areas da página desenhado como planta, com os ícones
+// de animais do próprio repo (img/icones/) no lugar do sidenav.
+const icones = ['cervo', 'leao', 'gato', 'vaca', 'ovelha', 'abelha'];
+const area = (x, y, w, h, nome) => `
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="rgba(255,255,255,.14)" stroke="rgba(255,255,255,.55)" stroke-dasharray="5 4"/>
+    <text x="${x + 10}" y="${y + 18}" font-family="ui-monospace,Consolas,monospace" font-size="12" fill="#ffffff" opacity=".85">${nome}</text>`;
+
 banner({
   arquivo: 'banner.svg',
   titulo: 'Wildbeast',
@@ -214,21 +246,28 @@ banner({
     { texto: 'Responsivo', fundo: 'rgba(255,255,255,.18)', cor: '#ffffff' },
     { texto: 'Projeto Origamid', fundo: 'rgba(255,255,255,.18)', cor: '#ffffff' },
   ],
-  card: {
-    fundo: '#0d1117',
-    conteudo: cardTerminal({
-      titulo: 'css/style.css',
-      linhas: [
-        `${am}.estrutura${_} {`,
-        `  ${mg}display${_}: ${c}grid${_};`,
-        `  ${mg}grid-template-columns${_}:`,
-        `    ${c}minmax(160px, 1fr) 3fr 300px${_};`,
-        `  ${mg}grid-template-areas${_}:`,
-        `    ${v}'header  header  header'${_}`,
-        `    ${v}'sidenav content anuncios'${_}`,
-        `    ${v}'footer  footer  footer'${_};`,
-        `}`,
-      ],
-    }),
-  },
+  arte: `
+  <g transform="translate(700,34)">
+    ${area(0, 0, 440, 44, "'header'")}
+    <text x="330" y="29" font-family="Georgia,serif" font-style="italic" font-size="20" font-weight="700" fill="#ffffff">wildbeast</text>
+    ${area(0, 54, 104, 222, "'sidenav'")}
+    ${icones
+      .map((icone, i) => {
+        const x = 12 + (i % 2) * 44;
+        const y = 76 + Math.floor(i / 2) * 64;
+        return `<rect x="${x}" y="${y}" width="38" height="38" rx="6" fill="#ffffff"/>
+    ${svgArquivo(`img/icones/${icone}.svg`, { x: x + 5, y: y + 5, largura: 28, altura: 28 })}`;
+      })
+      .join('\n    ')}
+    ${area(114, 54, 216, 222, "'content'")}
+    <text x="128" y="106" font-family="Georgia,serif" font-size="28" font-weight="700" fill="#ffffff">Lobo Cinza</text>
+    <rect x="128" y="120" width="180" height="7" rx="3.5" fill="#ffffff" opacity=".5"/>
+    <rect x="128" y="134" width="160" height="7" rx="3.5" fill="#ffffff" opacity=".5"/>
+    <rect x="128" y="154" width="88" height="106" rx="6" fill="#ffffff" opacity=".35"/>
+    <rect x="224" y="154" width="92" height="106" rx="6" fill="#ffffff" opacity=".35"/>
+    ${area(340, 54, 100, 222, "'anuncios'")}
+    <rect x="352" y="80" width="76" height="80" rx="6" fill="#ffffff" opacity=".35"/>
+    <rect x="352" y="170" width="76" height="90" rx="6" fill="#ffffff" opacity=".35"/>
+    ${area(0, 286, 440, 34, "'footer'")}
+  </g>`,
 });
